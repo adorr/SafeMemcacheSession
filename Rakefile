@@ -5,7 +5,7 @@ require 'spec/rake/spectask'
 begin
   require 'jeweler'
   Jeweler::Tasks.new do |gem|
-    gem.name = "memcache_session_store"
+    gem.name = "safe_memcache_session_store"
     gem.summary = %Q{Rails session store class}
     gem.email = "drewdorr@gmail.com"
     gem.homepage = "http://example.com"
