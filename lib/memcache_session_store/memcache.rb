@@ -3,7 +3,7 @@
 require 'rack/session/abstract/id'
 require 'memcache'
 
-module Rack
+module ActionDispatch
   module Session
     # Rack::Session::Memcache provides simple cookie based session management.
     # Session data is stored in memcached. The corresponding session key is
@@ -19,21 +19,38 @@ module Rack
     # Note that memcache does drop data before it may be listed to expire. For
     # a full description of behaviour, please see memcache's documentation.
 
-    class SafeMemcacheSessionStore < Abstract::ID
+    class SafeMemcacheSessionStore < AbstractStore
       attr_reader :mutex, :pool
 
-      DEFAULT_OPTIONS = Abstract::ID::DEFAULT_OPTIONS.merge \
+      DEFAULT_OPTIONS = Rack::Session::Abstract::ID::DEFAULT_OPTIONS.merge \
         :namespace => 'rack:session',
         :memcache_server => 'localhost:11211'
+      
+      LOCK_EXPIRATION = 3.seconds
+      MAX_LOCK_WAIT   = 3.seconds
+      LOCK_RETRY_FREQ = 0.1
 
       def initialize(app, options={})
         super
-
+        # Rails.logger.debug("******************* DEFAULT_OPTIONS : #{DEFAULT_OPTIONS.inspect}")
+        # Rails.logger.debug("******************* init options: #{options.inspect}")
+        
         @mutex = Mutex.new
         mserv = @default_options[:memcache_server]
+        # mopts always evals to an empty hash... why is this in Rails 3.1?
         mopts = @default_options.reject{|k,v| !MemCache::DEFAULT_OPTIONS.include? k }
+        # Rails.logger.debug("******************* default_options 1 : #{@default_options.inspect}")
+        # Rails.logger.debug("******************* mopts options: #{mopts.inspect}")
+        
+        # this was in the 3.0.9 code and seems to make more sense than using an empty hash.
+        @default_options = {
+                  :namespace => 'rack:session',
+                  :memcache_server => 'localhost:11211'
+                }.merge(@default_options)
+                
+        # Rails.logger.debug("******************* default_options : #{@default_options.inspect}")
 
-        @pool = options[:cache] || MemCache.new(mserv, mopts)
+        @pool = options[:cache] || MemCache.new(mserv, @default_options)
         unless @pool.active? and @pool.servers.any?{|c| c.alive? }
           raise 'No memcache servers'
         end
@@ -58,13 +75,25 @@ module Rack
         end
       end
 
-      def set_session(env, session_id, new_session, options)
-        expiry = options[:expire_after]
-        expiry = expiry.nil? ? 0 : expiry + 1
-
-        with_lock(env, false) do
-          @pool.set session_id, new_session, expiry
-          session_id
+      # Rails 3.1 wants 4 params, Rails 3.0.9 wants 3 params. The default value should work with both.
+      # def set_session(env, session_id, new_session, options)
+      def set_session(env, session_id, new_session, options = {})
+        Rails.logger.debug("******************* session_id: #{session_id.inspect}")
+        Rails.logger.debug("******************* new_session: #{new_session.inspect}")
+        Rails.logger.debug("******************* options: #{options.inspect}")
+        Rails.logger.debug("******************* default options: #{DEFAULT_OPTIONS.inspect}")
+        
+        wait_until = Time.now + MAX_LOCK_WAIT
+        success    = false
+        
+        while !success && Time.now < wait_until
+          success = safe_write(env, session_id, new_session, options)
+        
+          # If the add fails, another process has the lock. Sleep for a bit then try again.
+          unless success
+            Rails.logger.debug("********* write failed. retrying in #{LOCK_RETRY_FREQ}s")
+            sleep LOCK_RETRY_FREQ
+          end
         end
       end
 
@@ -86,6 +115,35 @@ module Rack
         default
       ensure
         @mutex.unlock if @mutex.locked?
+      end
+      
+      private
+      
+      def safe_write(env, session_id, new_session, options)
+        expiry = options[:expire_after]
+        expiry = expiry.nil? ? 0 : expiry + 1
+        Rails.logger.debug("******************* expiry: #{DEFAULT_OPTIONS[:expire_after].inspect}")
+        
+        # set a lock on the key lock_session_id using memcached's add operation.
+        # If the add succeeds, make the write then delete the lock.
+        locked = @pool.add "lock_#{session_id}", "locked", LOCK_EXPIRATION
+        
+        if /^STORED/ =~ locked
+          # Rails.logger.debug("************** safe_write stored")
+          
+          with_lock(env, false) do
+            # Rails.logger.debug("************* inside with_lock")
+            @pool.set session_id, new_session, expiry
+            session_id
+          end
+          
+          # Rails.logger.debug("*******deleting")
+          @pool.delete "lock_#{session_id}"
+          
+          return true
+        else
+          return false
+        end
       end
 
     end
