@@ -59,11 +59,12 @@ module ActionDispatch
       def generate_sid
         loop do
           sid = super
-          break sid unless @pool.get(sid, true)
+          break sid if safe_new_sid(sid)
         end
       end
 
       def get_session(env, sid)
+        Rails.logger.debug("************ getting session: #{sid.inspect}")
         with_lock(env, [nil, {}]) do
           unless sid and session = @pool.get(sid)
             sid, session = generate_sid, {}
@@ -98,6 +99,7 @@ module ActionDispatch
       end
 
       def destroy_session(env, session_id, options)
+        Rails.logger.debug("@@@@@@@@@@@@@@@@@@@@@@@ destroying session: #{session_id}")
         with_lock(env) do
           @pool.delete(session_id)
           generate_sid unless options[:drop]
@@ -120,9 +122,11 @@ module ActionDispatch
       private
       
       def safe_write(env, session_id, new_session, options)
-        expiry = options[:expire_after]
-        expiry = expiry.nil? ? 0 : expiry + 1
-        Rails.logger.debug("******************* expiry: #{DEFAULT_OPTIONS[:expire_after].inspect}")
+        # expiry = options[:expire_after]
+        # expiry = expiry.nil? ? 0 : expiry + 1
+        options = env['rack.session.options']
+        expiry  = options[:expire_after] || 0
+        Rails.logger.debug("******************* expiry: #{expiry}")
         
         # set a lock on the key lock_session_id using memcached's add operation.
         # If the add succeeds, make the write then delete the lock.
@@ -145,7 +149,21 @@ module ActionDispatch
           return false
         end
       end
-
+      
+      def safe_new_sid(session_id)
+        key = "#{DEFAULT_OPTIONS[:namespace]}:#{session_id}"
+        Rails.logger.debug("key: #{key.inspect}")
+        avail = @pool.add key, "", 300
+        
+        Rails.logger.debug("avail: #{avail.inspect}")
+        
+        if /^STORED/ =~ avail
+          Rails.logger.debug("session id is available")
+          return session_id
+        else
+          return false
+        end
+      end
     end
   end
 end
