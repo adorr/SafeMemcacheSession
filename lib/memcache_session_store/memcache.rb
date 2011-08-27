@@ -19,7 +19,7 @@ module Rack
     # Note that memcache does drop data before it may be listed to expire. For
     # a full description of behaviour, please see memcache's documentation.
 
-    class SafeMemcache < Abstract::ID
+    class SafeMemcacheSessionStore < Abstract::ID
       attr_reader :mutex, :pool
 
       DEFAULT_OPTIONS = Abstract::ID::DEFAULT_OPTIONS.merge \
