@@ -1,4 +1,4 @@
-# MongoSessionStore
+# Safer Memcache Session Store
 
 ## Description
 
