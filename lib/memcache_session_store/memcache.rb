@@ -141,9 +141,7 @@ module ActionDispatch
       private
       
       def safe_write(env, session_id, new_session, options)
-        # expiry = options[:expire_after]
-        # expiry = expiry.nil? ? 0 : expiry + 1        
-        expiry  = options[:expire_after] || 0
+        expiry = options[:expire_after] || 0
         Rails.logger.debug("******************* expiry: #{expiry}")
         
         # set a lock on the key lock_session_id using memcached's add operation.
