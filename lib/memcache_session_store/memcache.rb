@@ -74,7 +74,7 @@ module ActionDispatch
       end
 
       def get_session(env, sid)
-        sid = get_sid_from_params(env["QUERY_STRING"])
+        sid = get_sid_from_params(env["QUERY_STRING"]) || sid
         Rails.logger.debug("************ getting session: #{sid.inspect}")
         with_lock(env, [nil, {}]) do
           unless sid and session = @pool.get(sid)
@@ -179,7 +179,8 @@ module ActionDispatch
       end
       
       def get_sid_from_params(params)        
-        CGI::parse(params)["sid"].first rescue nil
+        sid = CGI::parse(params)["sid"].first rescue nil
+        @pool.get(sid) ? sid : nil
       end
     end
   end
