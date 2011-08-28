@@ -51,6 +51,8 @@ module ActionDispatch
           raise 'No memcache servers'
         end
       end
+      
+      private
 
       def generate_sid
         # loop do
@@ -74,19 +76,30 @@ module ActionDispatch
       end
 
       def get_session(env, sid)
-        sid = get_sid_from_params(env["QUERY_STRING"]) || sid
+        # Rails.logger.debug("||||||||||||||||||||||||||")
+        # Rails.logger.debug("||||||||||||||||||||||||||")
+        # Rails.logger.debug("||||||||||||||||||||||||||")
+        # Rails.logger.debug("||||||||||||||||||||||||||")
+        # Rails.logger.debug("|||||||||| env: #{env["rack.request.query_hash"][:sid].inspect}")
+        # paramsid = get_sid_from_params(env["QUERY_STRING"])
+        # sid = get_sid_from_params(env["QUERY_STRING"]) || sid
+        params_sid = env["rack.request.query_hash"][:sid] rescue nil
+        sid = params_sid || sid
         Rails.logger.debug("************ getting session: #{sid.inspect} ... #{env.inspect}")
         with_lock(env, [nil, {}]) do
           unless sid and session = @pool.get(sid)
             # sid, session = generate_sid, {}
             sid = generate_sid unless sid
             session = {}
+            Rails.logger.debug("==================== new sid: #{sid.inspect}")
             # unless /^STORED/ =~ @pool.add(sid, session)
               # raise "Session collision on '#{sid.inspect}'"
             # else
               # Rails.logger.debug("***** get session else sid: #{sid.inspect}")
             # end
           end
+          
+          Rails.logger.debug("==================== sid: #{sid.inspect}")
           [sid, session]
         end
       end
@@ -96,7 +109,7 @@ module ActionDispatch
       def set_session(env, session_id, new_session, options = {})
         options = env['rack.session.options']
         
-        Rails.logger.debug("******************* session_id: #{session_id.inspect} new_session: #{new_session.inspect}")
+        # Rails.logger.debug("******************* session_id: #{session_id.inspect} new_session: #{new_session.inspect}")
         # Rails.logger.debug("******************* options: #{options.inspect}")
         # Rails.logger.debug("******************* default options: #{DEFAULT_OPTIONS.inspect}")
         
@@ -139,8 +152,6 @@ module ActionDispatch
         @mutex.unlock if @mutex.locked?
       end
       
-      private
-      
       def safe_write(env, session_id, new_session, options)
         expiry = options[:expire_after] || 0
         Rails.logger.debug("******************* expiry: #{expiry}")
@@ -179,10 +190,14 @@ module ActionDispatch
         end
       end
       
-      def get_sid_from_params(params)        
-        sid = CGI::parse(params)["sid"].first rescue nil
-        @pool.get(sid) ? sid : nil
-      end
+      # def get_sid_from_params(params)        
+      #         # sid = CGI::parse(params)['sid'] #rescue nil
+      #         sid = CGI::parse(params)
+      #         Rails.logger.debug("******    sid: #{sid.inspect}")
+      #         
+      #         return sid
+      #         # @pool.get(sid) ? sid : nil
+      #       end
     end
   end
 end
