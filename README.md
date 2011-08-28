@@ -11,9 +11,6 @@ TODO: Write this file
 
 In your Gemfile:
 
-    gem "mongoid"
-    gem "mongo_session_store"
-
 In the session_store initializer (config/initializers/session_store.rb):
 
 
