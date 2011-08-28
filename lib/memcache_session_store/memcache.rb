@@ -75,11 +75,12 @@ module ActionDispatch
 
       def get_session(env, sid)
         sid = get_sid_from_params(env["QUERY_STRING"]) || sid
-        Rails.logger.debug("************ getting session: #{sid.inspect}")
+        Rails.logger.debug("************ getting session: #{sid.inspect} ... #{env.inspect}")
         with_lock(env, [nil, {}]) do
           unless sid and session = @pool.get(sid)
-            
-            sid, session = generate_sid, {}
+            # sid, session = generate_sid, {}
+            sid = generate_sid unless sid
+            session = {}
             # unless /^STORED/ =~ @pool.add(sid, session)
               # raise "Session collision on '#{sid.inspect}'"
             # else
