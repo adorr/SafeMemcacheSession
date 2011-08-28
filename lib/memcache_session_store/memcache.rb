@@ -76,16 +76,9 @@ module ActionDispatch
       end
 
       def get_session(env, sid)
-        # Rails.logger.debug("||||||||||||||||||||||||||")
-        # Rails.logger.debug("||||||||||||||||||||||||||")
-        # Rails.logger.debug("||||||||||||||||||||||||||")
-        # Rails.logger.debug("||||||||||||||||||||||||||")
-        # Rails.logger.debug("|||||||||| env: #{env["rack.request.query_hash"][:sid].inspect}")
-        # paramsid = get_sid_from_params(env["QUERY_STRING"])
-        # sid = get_sid_from_params(env["QUERY_STRING"]) || sid
         params_sid = env["rack.request.query_hash"][:sid] rescue nil
         sid = params_sid || sid
-        Rails.logger.debug("************ getting session: #{sid.inspect} ... #{env.inspect}")
+        Rails.logger.debug("************ getting session: #{sid.inspect}")
         with_lock(env, [nil, {}]) do
           unless sid and session = @pool.get(sid)
             # sid, session = generate_sid, {}
