@@ -1,7 +1,9 @@
 # AUTHOR: blink <blinketje@gmail.com>; blink#ruby-lang@irc.freenode.net
 
-require 'rack/session/abstract/id'
+# require 'rack/session/abstract/id'
+require 'action_dispatch/middleware/session/abstract_store'
 require 'memcache'
+require 'cgi'
 
 module ActionDispatch
   module Session
@@ -22,12 +24,12 @@ module ActionDispatch
     class SafeMemcacheSessionStore < AbstractStore
       attr_reader :mutex, :pool
 
-      DEFAULT_OPTIONS = Rack::Session::Abstract::ID::DEFAULT_OPTIONS.merge \
+      DEFAULT_OPTIONS = ActionDispatch::Session::AbstractStore::DEFAULT_OPTIONS.merge \
         :namespace => 'rack:session',
         :memcache_server => 'localhost:11211'
       
-      LOCK_EXPIRATION = 3.seconds
-      MAX_LOCK_WAIT   = 3.seconds
+      LOCK_EXPIRATION = 3
+      MAX_LOCK_WAIT   = 3
       LOCK_RETRY_FREQ = 0.1
 
       def initialize(app, options={})
@@ -36,13 +38,7 @@ module ActionDispatch
         # Rails.logger.debug("******************* init options: #{options.inspect}")
         
         @mutex = Mutex.new
-        mserv = @default_options[:memcache_server]
-        # mopts always evals to an empty hash... why is this in Rails 3.1?
-        mopts = @default_options.reject{|k,v| !MemCache::DEFAULT_OPTIONS.include? k }
-        # Rails.logger.debug("******************* default_options 1 : #{@default_options.inspect}")
-        # Rails.logger.debug("******************* mopts options: #{mopts.inspect}")
         
-        # this was in the 3.0.9 code and seems to make more sense than using an empty hash.
         @default_options = {
                   :namespace => 'rack:session',
                   :memcache_server => 'localhost:11211'
@@ -50,27 +46,45 @@ module ActionDispatch
                 
         # Rails.logger.debug("******************* default_options : #{@default_options.inspect}")
 
-        @pool = options[:cache] || MemCache.new(mserv, @default_options)
+        @pool = options[:cache] || MemCache.new(@default_options[:memcache_server], @default_options)
         unless @pool.active? and @pool.servers.any?{|c| c.alive? }
           raise 'No memcache servers'
         end
       end
 
       def generate_sid
-        loop do
+        # loop do
+        #   sid = super
+        #   # break sid if safe_new_sid(sid)
+        #   break sid unless @pool.get(sid)
+        # end
+        
+        sid = super
+        num_tries = 0
+        
+        while num_tries < 20 && !safe_new_sid(sid)
+          Rails.logger.debug("That sid was taken; trying to get another one...")
           sid = super
-          break sid if safe_new_sid(sid)
+          num_tries += 1
         end
+        
+        raise "Couldn't generate a unique session ID!" unless sid
+        
+        return sid
       end
 
       def get_session(env, sid)
+        sid = get_sid_from_params(env["QUERY_STRING"])
         Rails.logger.debug("************ getting session: #{sid.inspect}")
         with_lock(env, [nil, {}]) do
           unless sid and session = @pool.get(sid)
+            
             sid, session = generate_sid, {}
-            unless /^STORED/ =~ @pool.add(sid, session)
-              raise "Session collision on '#{sid.inspect}'"
-            end
+            # unless /^STORED/ =~ @pool.add(sid, session)
+              # raise "Session collision on '#{sid.inspect}'"
+            # else
+              # Rails.logger.debug("***** get session else sid: #{sid.inspect}")
+            # end
           end
           [sid, session]
         end
@@ -79,10 +93,11 @@ module ActionDispatch
       # Rails 3.1 wants 4 params, Rails 3.0.9 wants 3 params. The default value should work with both.
       # def set_session(env, session_id, new_session, options)
       def set_session(env, session_id, new_session, options = {})
-        Rails.logger.debug("******************* session_id: #{session_id.inspect}")
-        Rails.logger.debug("******************* new_session: #{new_session.inspect}")
-        Rails.logger.debug("******************* options: #{options.inspect}")
-        Rails.logger.debug("******************* default options: #{DEFAULT_OPTIONS.inspect}")
+        options = env['rack.session.options']
+        
+        Rails.logger.debug("******************* session_id: #{session_id.inspect} new_session: #{new_session.inspect}")
+        # Rails.logger.debug("******************* options: #{options.inspect}")
+        # Rails.logger.debug("******************* default options: #{DEFAULT_OPTIONS.inspect}")
         
         wait_until = Time.now + MAX_LOCK_WAIT
         success    = false
@@ -96,6 +111,10 @@ module ActionDispatch
             sleep LOCK_RETRY_FREQ
           end
         end
+        
+        Rails.logger.debug("********** set_session success: #{success.inspect}")
+        
+        return success
       end
 
       def destroy_session(env, session_id, options)
@@ -123,8 +142,7 @@ module ActionDispatch
       
       def safe_write(env, session_id, new_session, options)
         # expiry = options[:expire_after]
-        # expiry = expiry.nil? ? 0 : expiry + 1
-        options = env['rack.session.options']
+        # expiry = expiry.nil? ? 0 : expiry + 1        
         expiry  = options[:expire_after] || 0
         Rails.logger.debug("******************* expiry: #{expiry}")
         
@@ -144,25 +162,26 @@ module ActionDispatch
           # Rails.logger.debug("*******deleting")
           @pool.delete "lock_#{session_id}"
           
-          return true
+          return session_id
         else
+          Rails.logger.debug("locked isnt STORED, its: #{locked.inspect}")
           return false
         end
       end
       
       def safe_new_sid(session_id)
         key = "#{DEFAULT_OPTIONS[:namespace]}:#{session_id}"
-        Rails.logger.debug("key: #{key.inspect}")
         avail = @pool.add key, "", 300
         
-        Rails.logger.debug("avail: #{avail.inspect}")
-        
         if /^STORED/ =~ avail
-          Rails.logger.debug("session id is available")
           return session_id
         else
           return false
         end
+      end
+      
+      def get_sid_from_params(params)        
+        CGI::parse(params)["sid"].first rescue nil
       end
     end
   end
